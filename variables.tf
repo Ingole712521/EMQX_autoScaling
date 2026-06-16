@@ -119,15 +119,15 @@ variable "replicant_min_size" {
 }
 
 variable "replicant_desired_capacity" {
-  description = "Desired replicant nodes in ASG."
+  description = "Initial desired replicant count at apply time only; autoscaling may raise desired_capacity with load (ignored on subsequent applies)."
   type        = number
   default     = 1
 }
 
 variable "replicant_max_size" {
-  description = "Maximum replicant nodes in ASG."
+  description = "Hard ASG ceiling; set high enough for peak load (e.g. 10k connections needs several t3.small replicants)."
   type        = number
-  default     = 4
+  default     = 20
 }
 
 variable "scale_out_network_target_bytes" {
