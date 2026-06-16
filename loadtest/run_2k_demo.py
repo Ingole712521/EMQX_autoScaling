@@ -45,18 +45,11 @@ def main() -> int:
     parser.add_argument("--hold-sec", type=int, default=int(os.environ.get("HOLD_SEC", "600")))
     parser.add_argument("--connect-stagger", type=float, default=float(os.environ.get("CONNECT_STAGGER_SEC", "0.2")))
     parser.add_argument("--connect-timeout", type=float, default=float(os.environ.get("MQTT_CONNECT_TIMEOUT", "60")))
-    hold_conn_only = os.environ.get("HOLD_CONN_ONLY", "false").lower() in ("1", "true", "yes")
-    parser.add_argument(
-        "--hold-conn-only",
-        action=argparse.BooleanOptionalAction,
-        default=hold_conn_only,
-        help="Phase 3: hold connections without publishes (default: send light keepalive traffic)",
-    )
     parser.add_argument(
         "--hold-publish-interval",
         type=float,
         default=float(os.environ.get("HOLD_PUBLISH_INTERVAL_SEC", "30")),
-        help="Seconds between keepalive publishes per client in phase 3 (when not --hold-conn-only)",
+        help="Seconds between keepalive publishes per client in phase 3",
     )
     args = parser.parse_args()
 
@@ -89,13 +82,10 @@ def main() -> int:
     )
     print(f"ASG wait target: {min_asg} replicants before connection ramp (load-based unless MIN_ASG_CAPACITY set)")
     print(f"Connection ramp: {args.connect_stagger}s stagger (~{int(args.target_clients * args.connect_stagger)}s)")
-    if args.hold_conn_only:
-        print(f"Dashboard hold: {args.hold_sec}s conn-only (no publishes — connection count only)")
-    else:
-        print(
-            f"Dashboard hold: {args.hold_sec}s with keepalive publish every "
-            f"{args.hold_publish_interval}s/client (connections + message traffic)"
-        )
+    print(
+        f"Dashboard hold: {args.hold_sec}s with keepalive publish every "
+        f"{args.hold_publish_interval}s/client (connections + message traffic)"
+    )
     print("=" * 60)
 
     if args.asg_name:
@@ -146,10 +136,9 @@ def main() -> int:
     if stop.is_set():
         return 130
 
-    # Phase 3 — ramp connections and hold for dashboard (light publish keeps traffic visible)
-    hold_mode = "conn-only" if args.hold_conn_only else "keepalive publish"
+    # Phase 3 — ramp connections with keepalive publishes for dashboard + autoscaling
     print(
-        f"\n[Phase 3/3] Ramping to {args.target_clients} clients ({hold_mode}) — "
+        f"\n[Phase 3/3] Ramping to {args.target_clients} clients (keepalive publish) — "
         "open EMQX dashboard Nodes tab now"
     )
     ok = run_until_stopped(
@@ -158,15 +147,15 @@ def main() -> int:
         args.target_clients,
         "hold",
         "loadtest/hold",
-        publish_interval_sec=args.hold_publish_interval if not args.hold_conn_only else 1.0,
+        publish_interval_sec=args.hold_publish_interval,
         payload_size=64,
-        messages_per_burst=0 if args.hold_conn_only else 1,
+        messages_per_burst=1,
         connect_timeout_sec=args.connect_timeout,
         connect_stagger_sec=args.connect_stagger,
         global_stop=stop,
         asg_name=args.asg_name,
         aws_region=args.aws_region,
-        conn_only=args.hold_conn_only,
+        conn_only=False,
         duration_sec=args.hold_sec,
     )
 

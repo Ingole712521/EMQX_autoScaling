@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Proper ~2000-connection demo: warmup ASG -> wait -> conn-only hold for dashboard.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -13,13 +12,11 @@ export AWS_REGION AWS_DEFAULT_REGION="${AWS_REGION}"
 
 TARGET_CLIENTS="${TARGET_CLIENTS:-10000}"
 WARMUP_CLIENTS="${WARMUP_CLIENTS:-400}"
-# Optional fixed override; otherwise run_2k_demo.py computes from TARGET_CLIENTS / CLIENTS_PER_REPLICANT
 MIN_ASG_CAPACITY="${MIN_ASG_CAPACITY:-}"
 CLIENTS_PER_REPLICANT="${CLIENTS_PER_REPLICANT:-2000}"
 WARMUP_SEC="${WARMUP_SEC:-150}"
 HOLD_SEC="${HOLD_SEC:-600}"
 HOLD_PUBLISH_INTERVAL_SEC="${HOLD_PUBLISH_INTERVAL_SEC:-30}"
-HOLD_CONN_ONLY="${HOLD_CONN_ONLY:-false}"
 CONNECT_STAGGER_SEC="${CONNECT_STAGGER_SEC:-0.2}"
 MQTT_CONNECT_TIMEOUT="${MQTT_CONNECT_TIMEOUT:-60}"
 
@@ -29,13 +26,10 @@ if [[ -z "${MQTT_HOST}" ]]; then
 fi
 
 ulimit -n 65535 2>/dev/null || ulimit -n 8192 2>/dev/null || true
-
 PYTHON="$(bash "${ROOT}/scripts/lib/ensure_venv.sh" "${ROOT}")"
 "${PYTHON}" -m pip install -q -r loadtest/requirements.txt
-
 echo "MQTT preflight..."
 "${PYTHON}" scripts/mqtt_probe.py --host "${MQTT_HOST}"
-
 export PYTHONUNBUFFERED=1
 DEMO_ARGS=(
   -u loadtest/run_2k_demo.py
@@ -51,9 +45,6 @@ DEMO_ARGS=(
   --connect-stagger "${CONNECT_STAGGER_SEC}"
   --connect-timeout "${MQTT_CONNECT_TIMEOUT}"
 )
-if [[ "${HOLD_CONN_ONLY}" == "true" || "${HOLD_CONN_ONLY}" == "1" ]]; then
-  DEMO_ARGS+=(--hold-conn-only)
-fi
 if [[ -n "${MIN_ASG_CAPACITY}" ]]; then
   DEMO_ARGS+=(--min-asg "${MIN_ASG_CAPACITY}")
 fi
