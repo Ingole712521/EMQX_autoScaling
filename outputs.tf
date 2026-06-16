@@ -23,6 +23,26 @@ output "replicant_asg_name" {
   value       = aws_autoscaling_group.emqx_replicants_asg.name
 }
 
+output "emqx_core_instance_id" {
+  description = "EC2 instance ID of the EMQX core node (for SSM resilience tests)."
+  value       = aws_instance.emqx_core.id
+}
+
+output "mqtt_target_group_arn" {
+  description = "NLB MQTT target group ARN (for target health checks during validation)."
+  value       = aws_lb_target_group.mqtt_tg.arn
+}
+
+output "lifecycle_hook_name" {
+  description = "ASG lifecycle hook used for graceful MQTT drain on replicant termination."
+  value       = aws_autoscaling_lifecycle_hook.replicant_terminate.name
+}
+
+output "load_generator_instance_id" {
+  description = "EC2 instance ID of the validation load generator (empty if disabled)."
+  value       = var.enable_load_generator ? aws_instance.load_generator[0].id : ""
+}
+
 output "access_summary" {
   description = "Quick reference for URLs, ports, and firewall rules after deploy."
   value = {
@@ -48,5 +68,19 @@ output "verification_commands" {
     watch_bootstrap     = "powershell -ExecutionPolicy Bypass -File scripts/watch_bootstrap.ps1"
     verify_all          = "powershell -ExecutionPolicy Bypass -File scripts/verify_deployment.ps1"
     dashboard_url       = "http://${aws_eip.core_eip.public_ip}:18083"
+  }
+}
+
+output "validation_commands" {
+  description = "Cluster resilience and message durability validation scripts."
+  value = {
+    resilience_replicant = "powershell -File scripts/run_resilience_test.ps1 -Scenario replicant-terminate"
+    resilience_core      = "powershell -File scripts/run_resilience_test.ps1 -Scenario core-reboot"
+    resilience_dry_run   = "powershell -File scripts/run_resilience_test.ps1 -DryRun"
+    durability_smoke     = "powershell -File scripts/run_durability_test.ps1 -FromTerraform -Count 100000 -Rate 2000"
+    durability_full      = "powershell -File scripts/run_durability_test.ps1 -FromTerraform -Count 1000000 -Rate 5000"
+    deploy_to_loadgen    = var.enable_load_generator ? "powershell -File scripts/deploy_validation_bundle.ps1" : "enable_load_generator=true in terraform.tfvars"
+    lifecycle_hook       = aws_autoscaling_lifecycle_hook.replicant_terminate.name
+    lifecycle_log        = "/var/log/emqx-lifecycle-drain.log on replicants"
   }
 }

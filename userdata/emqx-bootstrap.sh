@@ -15,6 +15,13 @@ CORE_INSTANCE_ID="${core_instance_id}"
 SSM_CORE_PARAM="/${project_name}/core-private-ip"
 SSM_SEEDS_PARAM="/${project_name}/cluster-seeds"
 EMQX_VERSION="${emqx_version}"
+LIFECYCLE_HOOK_NAME="${lifecycle_hook_name}"
+ASG_NAME="${asg_name}"
+LIFECYCLE_HOOK_TIMEOUT_SEC="${lifecycle_hook_timeout_sec}"
+LIFECYCLE_DRAIN_GRACE_SEC="${lifecycle_drain_grace_sec}"
+MQTT_MAX_MQUEUE_LEN="${mqtt_max_mqueue_len}"
+MQTT_SESSION_EXPIRY_INTERVAL="${mqtt_session_expiry_interval}"
+MQTT_RETRY_INTERVAL="${mqtt_retry_interval}"
 EMQX_ETC="/etc/emqx"
 EMQX_CONF="/etc/emqx/emqx.conf"
 EMQX_ENV_FILE="/etc/emqx/terraform.env"
@@ -124,6 +131,9 @@ EMQX_DASHBOARD__LISTENERS__HTTP__BIND=18083
 EMQX_LISTENERS__TCP__DEFAULT__BIND=0.0.0.0:1883
 EMQX_LISTENERS__TCP__DEFAULT__ENABLE_AUTHN=false
 EMQX_MQTT__MAX_PACKET_SIZE=1MB
+EMQX_MQTT__MAX_MQUEUE_LEN=$MQTT_MAX_MQUEUE_LEN
+EMQX_MQTT__SESSION_EXPIRY_INTERVAL=$MQTT_SESSION_EXPIRY_INTERVAL
+EMQX_MQTT__RETRY_INTERVAL=$MQTT_RETRY_INTERVAL
 EOF
 
   cat > "$SYSTEMD_DROPIN/terraform.conf" <<'EOF'
@@ -234,8 +244,89 @@ validate_cluster() {
   fail "Replicant did not join cluster (expected >= 2 nodes including emqx@$PRIVATE_IP)"
 }
 
+install_lifecycle_drain() {
+  if [[ "$NODE_ROLE" != "replicant" || -z "$LIFECYCLE_HOOK_NAME" || -z "$ASG_NAME" ]]; then
+    return 0
+  fi
+
+  log "Installing ASG lifecycle drain watcher (hook=$LIFECYCLE_HOOK_NAME)"
+
+  cat > /usr/local/bin/emqx-lifecycle-drain.sh <<'DRAIN_EOF'
+#!/bin/bash
+set -euo pipefail
+REGION="__AWS_REGION__"
+ASG_NAME="__ASG_NAME__"
+HOOK_NAME="__HOOK_NAME__"
+DRAIN_GRACE_SEC="__DRAIN_GRACE_SEC__"
+LOG="/var/log/emqx-lifecycle-drain.log"
+log() { echo "[$(date -Is)] $*" | tee -a "$LOG"; }
+instance_id() {
+  local token
+  token=$(curl -fsS -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+  curl -fsS -H "X-aws-ec2-metadata-token: $token" "http://169.254.169.254/latest/meta-data/instance-id"
+}
+lifecycle_state() {
+  aws autoscaling describe-auto-scaling-instances --region "$REGION" --instance-ids "$1" \
+    --query "AutoScalingInstances[0].LifecycleState" --output text 2>/dev/null || echo "Unknown"
+}
+complete_hook() {
+  aws autoscaling complete-lifecycle-action --region "$REGION" \
+    --auto-scaling-group-name "$ASG_NAME" --lifecycle-hook-name "$HOOK_NAME" \
+    --lifecycle-action-result CONTINUE --instance-id "$1" \
+    || log "WARN: complete-lifecycle-action failed"
+}
+drain_emqx() {
+  log "Draining EMQX (grace $${DRAIN_GRACE_SEC}s)"
+  if systemctl is-active --quiet emqx 2>/dev/null; then
+    systemctl stop emqx || /usr/bin/emqx stop || true
+    sleep "$DRAIN_GRACE_SEC"
+  fi
+}
+: > "$LOG"
+log "Watcher started hook=$HOOK_NAME"
+iid=$(instance_id)
+while true; do
+  state=$(lifecycle_state "$iid")
+  if [[ "$state" == "Terminating:Wait" ]]; then
+    drain_emqx
+    complete_hook "$iid"
+    exit 0
+  fi
+  sleep 5
+done
+DRAIN_EOF
+
+  sed -i "s|__AWS_REGION__|$AWS_REGION|g" /usr/local/bin/emqx-lifecycle-drain.sh
+  sed -i "s|__ASG_NAME__|$ASG_NAME|g" /usr/local/bin/emqx-lifecycle-drain.sh
+  sed -i "s|__HOOK_NAME__|$LIFECYCLE_HOOK_NAME|g" /usr/local/bin/emqx-lifecycle-drain.sh
+  sed -i "s|__DRAIN_GRACE_SEC__|$LIFECYCLE_DRAIN_GRACE_SEC|g" /usr/local/bin/emqx-lifecycle-drain.sh
+  chmod 0755 /usr/local/bin/emqx-lifecycle-drain.sh
+
+  cat > /etc/systemd/system/emqx-lifecycle-drain.service <<EOF
+[Unit]
+Description=EMQX ASG lifecycle drain on termination
+After=network-online.target emqx.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/emqx-lifecycle-drain.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable emqx-lifecycle-drain.service
+  systemctl start emqx-lifecycle-drain.service
+  log "Lifecycle drain service started"
+}
+
 mark_ready() {
   log "STEP 9/9: Bootstrap complete"
+  install_lifecycle_drain
   date -Is > "$OK_MARKER"
   log "READY: role=$NODE_ROLE node=emqx@$PRIVATE_IP"
 }

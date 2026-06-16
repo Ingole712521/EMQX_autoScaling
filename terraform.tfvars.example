@@ -20,3 +20,12 @@ autoscaling_cooldown_sec       = 60
 scale_in_cooldown_sec          = 0
 scale_in_metric_period_sec     = 30
 scale_in_evaluation_periods    = 2
+
+# Validation: lifecycle drain + load generator + durable MQTT sessions
+enable_load_generator          = true
+load_generator_instance_type   = "t3.small"
+lifecycle_hook_timeout_sec     = 120
+lifecycle_drain_grace_sec      = 30
+mqtt_max_mqueue_len            = 100000
+mqtt_session_expiry_interval   = "2h"
+mqtt_retry_interval            = "30s"

@@ -15,12 +15,19 @@ data "aws_ami" "ubuntu_2204" {
 
 locals {
   emqx_bootstrap_base = {
-    node_cookie        = var.emqx_node_cookie
-    dashboard_username = var.emqx_dashboard_username
-    dashboard_password = var.emqx_dashboard_password
-    aws_region         = var.aws_region
-    project_name       = var.project_name
-    emqx_version       = var.emqx_version
+    node_cookie                  = var.emqx_node_cookie
+    dashboard_username           = var.emqx_dashboard_username
+    dashboard_password           = var.emqx_dashboard_password
+    aws_region                   = var.aws_region
+    project_name                 = var.project_name
+    emqx_version                 = var.emqx_version
+    lifecycle_hook_name          = ""
+    asg_name                     = ""
+    lifecycle_hook_timeout_sec   = var.lifecycle_hook_timeout_sec
+    lifecycle_drain_grace_sec    = var.lifecycle_drain_grace_sec
+    mqtt_max_mqueue_len          = var.mqtt_max_mqueue_len
+    mqtt_session_expiry_interval = var.mqtt_session_expiry_interval
+    mqtt_retry_interval          = var.mqtt_retry_interval
   }
 }
 
