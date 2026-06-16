@@ -82,6 +82,36 @@ variable "emqx_version" {
   default     = "5.8.9"
 }
 
+variable "emqx_tune_nofile" {
+  description = "Open file descriptor limit for OS + EMQX (EMQX performance tuning docs)."
+  type        = number
+  default     = 2097152
+}
+
+variable "emqx_tune_max_ports" {
+  description = "Erlang VM node.max_ports (EMQX performance tuning docs)."
+  type        = number
+  default     = 2097152
+}
+
+variable "emqx_tune_acceptors" {
+  description = "MQTT TCP listener acceptor pool size."
+  type        = number
+  default     = 64
+}
+
+variable "emqx_tune_max_connections" {
+  description = "MQTT TCP listener max_connections cap."
+  type        = number
+  default     = 1024000
+}
+
+variable "emqx_tune_dist_buffer_size_kb" {
+  description = "Core node Erlang distribution buffer size in KB (node.dist_buffer_size)."
+  type        = number
+  default     = 2097151
+}
+
 variable "replicant_min_size" {
   description = "Minimum replicant nodes in ASG."
   type        = number

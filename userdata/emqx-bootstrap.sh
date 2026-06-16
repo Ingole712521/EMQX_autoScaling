@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # EMQX 5.8.x bootstrap for AWS EC2 (core or replicant).
 # DEB layout: /etc/emqx/emqx.conf, overrides via /etc/emqx/terraform.env
 set -euo pipefail
@@ -29,6 +29,15 @@ SYSTEMD_DROPIN="/etc/systemd/system/emqx.service.d"
 LOG="/var/log/emqx-bootstrap.log"
 OK_MARKER="/var/log/emqx-bootstrap.ok"
 
+# Performance tuning (https://docs.emqx.com/en/emqx/latest/performance/tune.html)
+EMQX_TUNE_NOFILE="${tune_nofile}"
+EMQX_TUNE_MAX_PORTS="${tune_max_ports}"
+EMQX_TUNE_ACCEPTORS="${tune_acceptors}"
+EMQX_TUNE_MAX_CONNECTIONS="${tune_max_connections}"
+EMQX_TUNE_DIST_BUFFER_SIZE_KB="${tune_dist_buffer_size_kb}"
+
+${performance_tune_lib}
+
 log() {
   echo "[$(date -Is)] $*" | tee -a "$LOG"
 }
@@ -45,13 +54,18 @@ fail() {
 }
 
 install_packages() {
-  log "STEP 1/9: Installing system packages"
+  log "STEP 1/10: Installing system packages"
   apt-get update -y
   apt-get install -y curl gnupg apt-transport-https ca-certificates lsb-release awscli netcat-openbsd
 }
 
+apply_performance_tuning() {
+  log "STEP 2/10: OS + network performance tuning (EMQX docs)"
+  apply_emqx_performance_tuning "$NODE_ROLE"
+}
+
 install_emqx() {
-  log "STEP 2/9: Installing EMQX $EMQX_VERSION (DEB -> $EMQX_ETC)"
+  log "STEP 3/10: Installing EMQX $EMQX_VERSION (DEB -> $EMQX_ETC)"
   curl -fsSL https://assets.emqx.com/scripts/install-emqx-deb.sh | bash
   apt-get update -y
 
@@ -98,7 +112,7 @@ publish_cluster_ssm() {
 
 wait_for_core() {
   local core_ip="$1"
-  log "STEP 3/9: Waiting for core node $core_ip (ports 5369/4370)"
+  log "STEP 4/10: Waiting for core node $core_ip (ports 5369/4370)"
   for attempt in $(seq 1 90); do
     if nc -z "$core_ip" 5369 2>/dev/null || nc -z "$core_ip" 4370 2>/dev/null; then
       log "Core node is reachable on attempt $attempt"
@@ -114,7 +128,7 @@ write_emqx_env() {
   local private_ip="$1"
   local seeds_hocon="$2"
 
-  log "STEP 4/9: Writing EMQX 5.8 overrides to $EMQX_ENV_FILE"
+  log "STEP 5/10: Writing EMQX 5.8 overrides to $EMQX_ENV_FILE"
 
   install -d "$SYSTEMD_DROPIN"
 
@@ -136,6 +150,8 @@ EMQX_MQTT__SESSION_EXPIRY_INTERVAL=$MQTT_SESSION_EXPIRY_INTERVAL
 EMQX_MQTT__RETRY_INTERVAL=$MQTT_RETRY_INTERVAL
 EOF
 
+  append_emqx_performance_env "$NODE_ROLE" >> "$EMQX_ENV_FILE"
+
   cat > "$SYSTEMD_DROPIN/terraform.conf" <<'EOF'
 [Service]
 EnvironmentFile=-/etc/emqx/terraform.env
@@ -146,7 +162,7 @@ EOF
 }
 
 start_emqx() {
-  log "STEP 5/9: Starting EMQX via systemd"
+  log "STEP 6/10: Starting EMQX via systemd"
   systemctl daemon-reload
   systemctl enable emqx
   systemctl restart emqx
@@ -154,7 +170,7 @@ start_emqx() {
 
 wait_for_ports() {
   local require_dashboard="$1"
-  log "STEP 6/9: Waiting for EMQX listeners"
+  log "STEP 7/10: Waiting for EMQX listeners"
 
   for attempt in $(seq 1 60); do
     local mqtt_up=0
@@ -186,7 +202,7 @@ wait_for_ports() {
 }
 
 validate_emqx_service() {
-  log "STEP 7/9: Validating EMQX service"
+  log "STEP 8/10: Validating EMQX service"
   for attempt in $(seq 1 20); do
     if systemctl is-active --quiet emqx 2>/dev/null; then
       local status_out
@@ -212,7 +228,7 @@ count_cluster_nodes() {
 }
 
 validate_cluster() {
-  log "STEP 8/9: Validating cluster membership"
+  log "STEP 9/10: Validating cluster membership"
   local status_output
   status_output="$(/usr/bin/emqx ctl cluster status 2>&1 | tee -a "$LOG")"
 
@@ -325,8 +341,7 @@ EOF
 }
 
 mark_ready() {
-  log "STEP 9/9: Bootstrap complete"
-  install_lifecycle_drain
+  log "STEP 10/10: Bootstrap complete"
   date -Is > "$OK_MARKER"
   log "READY: role=$NODE_ROLE node=emqx@$PRIVATE_IP"
 }
@@ -337,6 +352,7 @@ main() {
 
   log "Bootstrap started (role=$NODE_ROLE, EMQX $EMQX_VERSION)"
   install_packages
+  apply_performance_tuning
   install_emqx
 
   PRIVATE_IP="$(get_private_ip)"

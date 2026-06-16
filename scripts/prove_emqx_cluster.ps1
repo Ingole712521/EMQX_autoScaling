@@ -11,6 +11,7 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
+. (Join-Path (Join-Path $PSScriptRoot "lib") "PlatformHelpers.ps1")
 
 $coreIp = terraform output -raw emqx_core_public_ip
 $mqttHost = terraform output -raw mqtt_nlb_dns_name
@@ -36,11 +37,11 @@ if ([string]::IsNullOrWhiteSpace($DashboardPassword)) {
 if ([string]::IsNullOrWhiteSpace($DashboardPassword)) {
     Write-Host "Password required. Use one of:" -ForegroundColor Yellow
     Write-Host '  $env:EMQX_DASHBOARD_PASSWORD = "your-password"'
-    Write-Host '  .\scripts\prove_emqx_cluster.ps1 -DashboardPassword "your-password"'
+    Write-Host '  ./scripts/prove_emqx_cluster.ps1 -DashboardPassword "your-password"'
     exit 1
 }
 
-python -m pip install -q -r loadtest/requirements.txt
+Install-PythonRequirements -ProjectRoot $Root | Out-Null
 
 $env:EMQX_CORE_IP = $coreIp
 $env:MQTT_HOST = $mqttHost
@@ -52,7 +53,7 @@ $env:PROJECT_NAME = $ProjectName
 
 # Pass password via env only (avoids special-character breakage on CLI).
 $argsList = @(
-    "scripts/prove_emqx_cluster.py",
+    (Join-MultiplePath @($Root, "scripts", "prove_emqx_cluster.py")),
     "--region", $Region,
     "--project", $ProjectName,
     "--core-ip", $coreIp,
@@ -63,5 +64,5 @@ $argsList = @(
 )
 if ($SkipLoad) { $argsList += "--skip-load" }
 
-python @argsList
-exit $LASTEXITCODE
+$exitCode = Invoke-ProjectPython -ProjectRoot $Root @argsList
+exit $exitCode

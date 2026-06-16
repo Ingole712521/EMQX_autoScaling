@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+. (Join-Path (Join-Path $PSScriptRoot "lib") "PlatformHelpers.ps1")
 
 function Get-CoreInstanceId {
     param(
@@ -141,8 +142,7 @@ function Test-PortOpen {
         return $false
     }
 
-    $result = Test-NetConnection -ComputerName $HostName -Port $Port -WarningAction SilentlyContinue
-    return [bool]$result.TcpTestSucceeded
+    return Test-TcpPortOpen -HostName $HostName -Port $Port
 }
 
 if ([string]::IsNullOrWhiteSpace($CoreIp)) {

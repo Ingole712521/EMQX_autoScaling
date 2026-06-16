@@ -55,6 +55,9 @@ output "access_summary" {
     ssh_allowed_cidr       = var.ssh_allowed_cidr
     autoscaling            = "Network > ${var.scale_out_network_target_bytes} B/s or CPU > ${var.scale_out_cpu_threshold}% (+1); CPU < ${var.scale_in_cpu_threshold}% (-1); min=${var.replicant_min_size} max=${var.replicant_max_size}"
     emqx_version           = var.emqx_version
+    performance_tuning     = "Applied at bootstrap per docs.emqx.com/performance/tune (sysctl, limits, EMQX listener/session caps)"
+    tune_nofile            = var.emqx_tune_nofile
+    tune_max_connections   = var.emqx_tune_max_connections
     bootstrap_log          = "/var/log/emqx-bootstrap.log on each instance"
     config_method          = "EMQX 5.8 env overrides via /etc/emqx/terraform.env + systemd drop-in"
   }
@@ -63,10 +66,10 @@ output "access_summary" {
 output "verification_commands" {
   description = "Post-deploy verification (no SSH required)."
   value = {
-    dashboard_port_test = "Test-NetConnection -ComputerName ${aws_eip.core_eip.public_ip} -Port 18083"
-    mqtt_port_test      = "Test-NetConnection -ComputerName ${aws_lb.mqtt_nlb.dns_name} -Port 1883"
-    watch_bootstrap     = "powershell -ExecutionPolicy Bypass -File scripts/watch_bootstrap.ps1"
-    verify_all          = "powershell -ExecutionPolicy Bypass -File scripts/verify_deployment.ps1"
+    dashboard_port_test = "pwsh -Command \"Test-TcpPortOpen -HostName ${aws_eip.core_eip.public_ip} -Port 18083\" (dot-source scripts/lib/PlatformHelpers.ps1 first)"
+    mqtt_port_test      = "pwsh -Command \"Test-TcpPortOpen -HostName ${aws_lb.mqtt_nlb.dns_name} -Port 1883\" (dot-source scripts/lib/PlatformHelpers.ps1 first)"
+    watch_bootstrap     = "pwsh -File scripts/watch_bootstrap.ps1"
+    verify_all          = "pwsh -File scripts/verify_deployment.ps1"
     dashboard_url       = "http://${aws_eip.core_eip.public_ip}:18083"
   }
 }

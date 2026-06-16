@@ -2,7 +2,6 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=lib/common.sh
 source "${ROOT}/scripts/lib/common.sh"
 
-emqx_run_pwsh "${ROOT}/scripts/deploy_and_load_test.ps1" "$@"
+emqx_run_pwsh "${ROOT}/scripts/prove_emqx_cluster.ps1" "$@"

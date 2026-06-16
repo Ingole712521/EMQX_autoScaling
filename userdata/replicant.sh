@@ -1,7 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # EMQX 5.8.x replicant — joins core cluster via Route53 seeds, serves NLB MQTT traffic.
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
+
+EMQX_TUNE_NOFILE="${tune_nofile}"
+EMQX_TUNE_MAX_PORTS="${tune_max_ports}"
+EMQX_TUNE_ACCEPTORS="${tune_acceptors}"
+EMQX_TUNE_MAX_CONNECTIONS="${tune_max_connections}"
+EMQX_TUNE_DIST_BUFFER_SIZE_KB="${tune_dist_buffer_size_kb}"
+
+${performance_tune_lib}
 
 LOG="/var/log/emqx-bootstrap.log"
 OK_MARKER="/var/log/emqx-bootstrap.ok"
@@ -17,6 +25,9 @@ rm -f "$OK_MARKER"
 
 apt-get update -y
 apt-get install -y curl gnupg apt-transport-https ca-certificates lsb-release netcat-openbsd jq
+
+log "Applying OS + EMQX performance tuning (replicant)"
+apply_emqx_performance_tuning "replicant"
 
 curl -fsSL https://assets.emqx.com/scripts/install-emqx-deb.sh | bash
 apt-get update -y
@@ -57,6 +68,8 @@ EMQX_LISTENERS__TCP__DEFAULT__BIND=0.0.0.0:1883
 EMQX_LISTENERS__TCP__DEFAULT__ENABLE_AUTHN=false
 EMQX_MQTT__MAX_PACKET_SIZE=1MB
 EOF
+
+append_emqx_performance_env "replicant" >> "$EMQX_ENV_FILE"
 
 cat > "$SYSTEMD_DROPIN/terraform.conf" <<'EOF'
 [Service]

@@ -16,6 +16,8 @@ from dataclasses import dataclass
 
 import paho.mqtt.client as mqtt
 
+from mqtt_common import connack_ok
+
 
 @dataclass(frozen=True)
 class Stage:
@@ -34,15 +36,10 @@ DEFAULT_STAGES = [
 DEFAULT_PUBLISH_INTERVAL = 0.001
 DEFAULT_PAYLOAD_SIZE = 16384
 DEFAULT_MESSAGES_PER_BURST = 10
+DEFAULT_CONNECT_STAGGER_SEC = float(os.environ.get("CONNECT_STAGGER_SEC", "0.05"))
 DEFAULT_LOAD_STAGES = ",".join(
     f"{s.clients}:{s.duration_sec}:{s.label}" for s in DEFAULT_STAGES
 )
-
-
-def connack_ok(reason_code: object) -> bool:
-    if reason_code is None:
-        return False
-    return getattr(reason_code, "value", reason_code) == 0
 
 
 class LoadClient(threading.Thread):
@@ -59,6 +56,7 @@ class LoadClient(threading.Thread):
         connect_timeout_sec: float,
         error_samples: list[str],
         error_lock: threading.Lock,
+        conn_only: bool = False,
     ) -> None:
         super().__init__(daemon=True)
         self.host = host
@@ -72,8 +70,10 @@ class LoadClient(threading.Thread):
         self.connect_timeout_sec = connect_timeout_sec
         self.error_samples = error_samples
         self.error_lock = error_lock
+        self.conn_only = conn_only
         self.published = 0
         self.errors = 0
+        self.connected = False
 
     def _fail(self, message: str) -> None:
         self.errors += 1
@@ -106,6 +106,13 @@ class LoadClient(threading.Thread):
                 return
             if not connack_ok(conn_rc[0]):
                 self._fail(f"CONNACK rejected ({conn_rc[0]})")
+                return
+
+            self.connected = True
+
+            if self.conn_only:
+                while not self.stop_event.is_set():
+                    self.stop_event.wait(timeout=30.0)
                 return
 
             seq = 0
@@ -204,6 +211,27 @@ def log_asg_capacity(asg_name: str, region: str, label: str) -> None:
         print(f"  ASG {asg_name} desired_capacity={cap} ({label})")
 
 
+def wait_asg_min_capacity(
+    asg_name: str,
+    region: str,
+    min_capacity: int,
+    timeout_sec: int = 900,
+    poll_sec: int = 30,
+) -> bool:
+    if not asg_name:
+        return False
+    deadline = time.time() + timeout_sec
+    print(f"Waiting for ASG {asg_name} desired_capacity >= {min_capacity} (timeout {timeout_sec}s)...")
+    while time.time() < deadline:
+        cap = asg_desired_capacity(asg_name, region)
+        if cap is not None:
+            print(f"  ASG desired_capacity={cap}")
+            if cap >= min_capacity:
+                return True
+        time.sleep(poll_sec)
+    return False
+
+
 def run_until_stopped(
     host: str,
     port: int,
@@ -214,18 +242,27 @@ def run_until_stopped(
     payload_size: int,
     messages_per_burst: int,
     connect_timeout_sec: float,
+    connect_stagger_sec: float,
     global_stop: threading.Event,
     asg_name: str = "",
     aws_region: str = "ap-south-1",
+    conn_only: bool = False,
+    duration_sec: int = 0,
 ) -> bool:
-    """Run N MQTT clients until global_stop is set (Ctrl+C)."""
+    """Run N MQTT clients until Ctrl+C, duration_sec, or global_stop."""
     stop_event = threading.Event()
     threads: list[LoadClient] = []
     error_samples: list[str] = []
     error_lock = threading.Lock()
 
-    print(f"\n[sustained] {label}: {clients} clients until you press Ctrl+C")
-    print("  Watch ASG desired capacity in AWS Console while this runs.")
+    mode = "conn-only (dashboard hold)" if conn_only else "publish load"
+    print(f"\n[sustained] {label}: {clients} clients — {mode}")
+    print(f"  Connect stagger: {connect_stagger_sec}s between clients (~{int(clients * connect_stagger_sec)}s ramp)")
+    if duration_sec > 0:
+        print(f"  Hold duration: {duration_sec}s (refresh EMQX dashboard during this window)")
+    else:
+        print("  Press Ctrl+C to stop.")
+    print("  Watch ASG + EMQX dashboard Nodes tab while this runs.")
 
     for i in range(clients):
         if global_stop.is_set():
@@ -242,23 +279,34 @@ def run_until_stopped(
             connect_timeout_sec=connect_timeout_sec,
             error_samples=error_samples,
             error_lock=error_lock,
+            conn_only=conn_only,
         )
         threads.append(worker)
         worker.start()
-        time.sleep(0.05)
+        time.sleep(connect_stagger_sec)
 
     started = time.time()
+    end_at = started + duration_sec if duration_sec > 0 else None
     while not global_stop.is_set():
+        if end_at is not None and time.time() >= end_at:
+            print(f"\nHold complete ({duration_sec}s) — disconnecting clients...")
+            break
         time.sleep(10)
         published = sum(t.published for t in threads)
         errors = sum(t.errors for t in threads)
+        connected = sum(1 for t in threads if t.connected)
         elapsed = int(time.time() - started)
-        line = f"  elapsed={elapsed}s published={published} errors={errors} clients={len(threads)}"
+        line = (
+            f"  elapsed={elapsed}s connected={connected}/{len(threads)} "
+            f"errors={errors} published={published}"
+        )
         if asg_name:
             cap = asg_desired_capacity(asg_name, aws_region)
             if cap is not None:
                 line += f" asg_desired={cap}"
         print(line)
+        if conn_only and connected >= clients * 9 // 10 and connected > 0:
+            print(f"  >> Dashboard should show ~{connected} connections across replicant nodes")
         if errors and error_samples:
             for sample in error_samples[:3]:
                 print(f"    sample: {sample}")
@@ -270,7 +318,10 @@ def run_until_stopped(
 
     published = sum(t.published for t in threads)
     errors = sum(t.errors for t in threads)
-    print(f"[sustained] stopped published={published} errors={errors}")
+    connected = sum(1 for t in threads if t.connected)
+    print(f"[sustained] stopped connected={connected}/{len(threads)} published={published} errors={errors}")
+    if conn_only:
+        return connected >= clients * 8 // 10
     return published > 0 and errors == 0
 
 
@@ -284,6 +335,7 @@ def run_stage(
     messages_per_burst: int,
     stage_index: int,
     connect_timeout_sec: float,
+    connect_stagger_sec: float = DEFAULT_CONNECT_STAGGER_SEC,
 ) -> bool:
     stop_event = threading.Event()
     threads: list[LoadClient] = []
@@ -311,7 +363,7 @@ def run_stage(
         )
         threads.append(worker)
         worker.start()
-        time.sleep(0.08)
+        time.sleep(connect_stagger_sec)
 
     deadline = time.time() + stage.duration_sec
     while time.time() < deadline:
@@ -347,6 +399,12 @@ def main() -> int:
     parser.add_argument("--stages", default=os.environ.get("LOAD_STAGES", DEFAULT_LOAD_STAGES))
     parser.add_argument("--skip-preflight", action="store_true")
     parser.add_argument("--connect-timeout", type=float, default=float(os.environ.get("MQTT_CONNECT_TIMEOUT", "20")))
+    parser.add_argument(
+        "--connect-stagger",
+        type=float,
+        default=float(os.environ.get("CONNECT_STAGGER_SEC", str(DEFAULT_CONNECT_STAGGER_SEC))),
+        help="Seconds between starting each client (avoid connection storms)",
+    )
     parser.add_argument("--asg-name", default=os.environ.get("ASG_NAME", ""))
     parser.add_argument("--aws-region", default=os.environ.get("AWS_REGION", "ap-south-1"))
     parser.add_argument(
@@ -357,8 +415,20 @@ def main() -> int:
     parser.add_argument(
         "--clients",
         type=int,
-        default=int(os.environ.get("LOAD_CLIENTS", "100")),
+        default=int(os.environ.get("LOAD_CLIENTS", os.environ.get("CLIENTS", "100"))),
         help="Number of MQTT clients for --sustained mode (default 100)",
+    )
+    parser.add_argument(
+        "--conn-only",
+        action="store_true",
+        default=os.environ.get("CONN_ONLY", "").lower() in ("1", "true", "yes"),
+        help="Hold connections open without publish load (best for dashboard connection count)",
+    )
+    parser.add_argument(
+        "--duration",
+        type=int,
+        default=int(os.environ.get("LOAD_DURATION_SEC", "0")),
+        help="Auto-stop after N seconds (0 = until Ctrl+C)",
     )
     args = parser.parse_args()
 
@@ -393,9 +463,12 @@ def main() -> int:
             args.payload_size,
             args.messages_per_burst,
             args.connect_timeout,
+            args.connect_stagger,
             stop,
             asg_name=args.asg_name,
             aws_region=args.aws_region,
+            conn_only=args.conn_only,
+            duration_sec=args.duration,
         )
         if args.asg_name:
             log_asg_capacity(args.asg_name, args.aws_region, "after sustained load")
@@ -419,6 +492,7 @@ def main() -> int:
             args.messages_per_burst,
             idx,
             args.connect_timeout,
+            args.connect_stagger,
         ):
             print("Stage failed — fix broker/NLB before continuing.")
             return 1

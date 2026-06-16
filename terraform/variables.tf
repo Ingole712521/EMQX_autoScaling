@@ -76,6 +76,32 @@ variable "emqx_dashboard_password" {
   sensitive   = true
 }
 
+variable "emqx_tune_nofile" {
+  description = "Open file descriptor limit (EMQX performance tuning)."
+  type        = number
+  default     = 2097152
+}
+
+variable "emqx_tune_max_ports" {
+  type    = number
+  default = 2097152
+}
+
+variable "emqx_tune_acceptors" {
+  type    = number
+  default = 64
+}
+
+variable "emqx_tune_max_connections" {
+  type    = number
+  default = 1024000
+}
+
+variable "emqx_tune_dist_buffer_size_kb" {
+  type    = number
+  default = 2097151
+}
+
 variable "key_pair_name" {
   description = "Single key pair name for all EMQX instances."
   type        = string

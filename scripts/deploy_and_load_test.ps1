@@ -58,28 +58,6 @@ function Show-DeploySummary {
     Write-Host ""
 }
 
-function Start-LoadTestTerminal {
-    param(
-        [string]$Root,
-        [string]$MqttHost
-    )
-
-    $loadScript = Join-Path $Root "scripts\run_staged_load_test.ps1"
-    $command = @"
-Set-Location '$Root'
-`$env:PYTHONUNBUFFERED = '1'
-`$env:PUBLISH_INTERVAL = '0.001'
-`$env:PAYLOAD_SIZE = '16384'
-`$env:MESSAGES_PER_BURST = '10'
-`$env:LOAD_STAGES = '40:180:baseline-heavy,80:300:scale-out-2,120:300:scale-out-3,10:90:scale-in'
-Write-Host 'Starting HIGH-INTENSITY autoscaling load test against $MqttHost' -ForegroundColor Green
-& '$loadScript' -MqttHost '$MqttHost'
-"@
-
-    Start-Process powershell -ArgumentList @("-NoExit", "-Command", $command)
-    Write-Host "Load test started in a new PowerShell window." -ForegroundColor Green
-}
-
 function Test-TerraformStateAvailable {
     param([string]$StateFile = "terraform.tfstate")
 
@@ -105,6 +83,7 @@ function Test-TerraformStateAvailable {
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
+. (Join-Path (Join-Path $PSScriptRoot "lib") "PlatformHelpers.ps1")
 
 if (-not (Get-Command terraform -ErrorAction SilentlyContinue)) {
     throw "terraform is not installed or not on PATH."
@@ -116,7 +95,7 @@ if (-not $SkipApply) {
         Write-Host "terraform.tfstate is locked by another process." -ForegroundColor Yellow
         Write-Host "Wait for any running 'terraform apply/plan' to finish, then retry."
         Write-Host "Or run with -SkipApply if apply already completed:"
-        Write-Host '  powershell -ExecutionPolicy Bypass -File .\scripts\deploy_and_load_test.ps1 -SkipApply'
+        Write-Host '  pwsh -File ./scripts/deploy_and_load_test.ps1 -SkipApply'
         Write-Host ""
         throw "Terraform state file is locked."
     }
@@ -160,7 +139,7 @@ if ([string]::IsNullOrWhiteSpace($asgName)) {
 
 Show-DeploySummary -DashboardUrl $dashboardUrl -MqttHost $mqttHost -CoreIp $coreIp -AsgName $asgName
 
-$watchScript = Join-Path $Root "scripts\watch_bootstrap.ps1"
+$watchScript = Join-Path (Join-Path $Root "scripts") "watch_bootstrap.ps1"
 Write-Host "Watching EMQX bootstrap progress (live logs from instance)..."
 $bootstrapReady = & $watchScript -CoreIp $coreIp -MqttHost $mqttHost
 
@@ -169,10 +148,10 @@ if (-not $bootstrapReady) {
 }
 
 Write-Host "Opening dashboard in browser..."
-Start-Process $dashboardUrl
+Open-UrlInBrowser -Url $dashboardUrl
 
 if (-not $SkipLoadTest) {
-    Start-LoadTestTerminal -Root $Root -MqttHost $mqttHost
+    Start-LoadTestInNewTerminal -ProjectRoot $Root -MqttHost $mqttHost
 }
 
 Write-Host "Done. Watch Auto Scaling Group activity in AWS Console." -ForegroundColor Green

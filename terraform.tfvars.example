@@ -2,6 +2,12 @@
 aws_region              = "ap-south-1"
 project_name            = "emqx-prod"
 emqx_version            = "5.8.9"
+# Performance tuning (https://docs.emqx.com/en/emqx/latest/performance/tune.html)
+emqx_tune_nofile              = 2097152
+emqx_tune_max_ports           = 2097152
+emqx_tune_acceptors           = 64
+emqx_tune_max_connections     = 1024000
+emqx_tune_dist_buffer_size_kb = 2097151
 emqx_node_cookie        = "ChangeThisCookieForProduction"
 emqx_dashboard_username = "admin"
 emqx_dashboard_password = "ChangeMe!StrongPassword"

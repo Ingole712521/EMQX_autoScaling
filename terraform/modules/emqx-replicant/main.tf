@@ -32,10 +32,16 @@ resource "aws_launch_template" "this" {
   update_default_version = true
 
   user_data = base64encode(templatefile(var.replicant_userdata_template_path, {
-    node_cookie        = var.node_cookie
-    dashboard_username = var.dashboard_username
-    dashboard_password = var.dashboard_password
-    seed_nodes         = jsonencode(var.core_seed_hosts)
+    node_cookie                = var.node_cookie
+    dashboard_username         = var.dashboard_username
+    dashboard_password         = var.dashboard_password
+    seed_nodes                 = jsonencode(var.core_seed_hosts)
+    tune_nofile                = var.emqx_tune_nofile
+    tune_max_ports             = var.emqx_tune_max_ports
+    tune_acceptors             = var.emqx_tune_acceptors
+    tune_max_connections       = var.emqx_tune_max_connections
+    tune_dist_buffer_size_kb   = var.emqx_tune_dist_buffer_size_kb
+    performance_tune_lib       = file("${path.root}/../userdata/emqx-performance-tune.sh")
   }))
 
   tag_specifications {

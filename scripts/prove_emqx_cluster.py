@@ -19,9 +19,13 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import paho.mqtt.client as mqtt
 import requests
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "loadtest"))
+from mqtt_common import connack_ok  # noqa: E402
 
 
 @dataclass
@@ -44,12 +48,6 @@ class ProofReport:
 
     def ok(self) -> bool:
         return all(r.passed for r in self.results)
-
-
-def connack_ok(reason_code: object) -> bool:
-    if reason_code is None:
-        return False
-    return getattr(reason_code, "value", reason_code) == 0
 
 
 def aws_json(cmd: list[str]) -> dict | list | None:

@@ -3,24 +3,24 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
+source "${ROOT}/scripts/lib/common.sh"
 
 MQTT_HOST="${MQTT_HOST:-}"
 FROM_TERRAFORM="${FROM_TERRAFORM:-false}"
 TERRAFORM_DIR="${TERRAFORM_DIR:-.}"
-PUBLISH_INTERVAL="${PUBLISH_INTERVAL:-}"
-PAYLOAD_SIZE="${PAYLOAD_SIZE:-}"
+PUBLISH_INTERVAL="${PUBLISH_INTERVAL:-0.001}"
+PAYLOAD_SIZE="${PAYLOAD_SIZE:-16384}"
+MESSAGES_PER_BURST="${MESSAGES_PER_BURST:-10}"
+LOAD_STAGES="${LOAD_STAGES:-40:180:baseline-heavy,80:300:scale-out-2,120:300:scale-out-3,10:90:scale-in}"
+ASG_NAME="${ASG_NAME:-}"
 
 if [[ "${FROM_TERRAFORM}" == "true" ]]; then
   if ! command -v terraform >/dev/null 2>&1; then
     echo "terraform is required for FROM_TERRAFORM=true"
     exit 1
   fi
-  for name in mqtt_nlb_dns_name nlb_dns_name; do
-    if host="$(terraform -chdir="${TERRAFORM_DIR}" output -raw "${name}" 2>/dev/null)"; then
-      MQTT_HOST="${host}"
-      break
-    fi
-  done
+  MQTT_HOST="$(emqx_from_terraform_host "${TERRAFORM_DIR}")"
+  ASG_NAME="$(emqx_terraform_output replicant_asg_name "${TERRAFORM_DIR}" || true)"
 fi
 
 if [[ -z "${MQTT_HOST}" ]]; then
@@ -29,22 +29,25 @@ if [[ -z "${MQTT_HOST}" ]]; then
   exit 1
 fi
 
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 is required."
-  exit 1
+PYTHON="$(bash "${ROOT}/scripts/lib/ensure_venv.sh" "${ROOT}")"
+"${PYTHON}" -m pip install -q -r loadtest/requirements.txt
+
+echo "MQTT preflight..."
+"${PYTHON}" scripts/mqtt_probe.py --host "${MQTT_HOST}"
+
+ARGS=(
+  -u loadtest/staged_load.py
+  --host "${MQTT_HOST}"
+  --publish-interval "${PUBLISH_INTERVAL}"
+  --payload-size "${PAYLOAD_SIZE}"
+  --messages-per-burst "${MESSAGES_PER_BURST}"
+  --stages "${LOAD_STAGES}"
+)
+
+if [[ -n "${ASG_NAME}" ]]; then
+  ARGS+=(--asg-name "${ASG_NAME}")
 fi
 
-python3 -m pip install -q -r loadtest/requirements.txt
-
-ARGS=(loadtest/staged_load.py --host "${MQTT_HOST}")
-
-if [[ -n "${PUBLISH_INTERVAL}" ]]; then
-  ARGS+=(--publish-interval "${PUBLISH_INTERVAL}")
-fi
-
-if [[ -n "${PAYLOAD_SIZE}" ]]; then
-  ARGS+=(--payload-size "${PAYLOAD_SIZE}")
-fi
-
+export PYTHONUNBUFFERED=1
 echo "Running staged load test against ${MQTT_HOST}"
-python3 "${ARGS[@]}"
+exec "${PYTHON}" "${ARGS[@]}"

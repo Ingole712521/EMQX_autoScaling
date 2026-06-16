@@ -68,6 +68,11 @@ module "emqx_core" {
   core_seed_hosts             = local.core_seed_hosts
   instance_type               = var.core_instance_type
   core_userdata_template_path = "${path.root}/../userdata/core.sh"
+  emqx_tune_nofile              = var.emqx_tune_nofile
+  emqx_tune_max_ports           = var.emqx_tune_max_ports
+  emqx_tune_acceptors           = var.emqx_tune_acceptors
+  emqx_tune_max_connections     = var.emqx_tune_max_connections
+  emqx_tune_dist_buffer_size_kb = var.emqx_tune_dist_buffer_size_kb
   tags                        = local.common_tags
 }
 
@@ -107,6 +112,11 @@ module "emqx_replicant" {
   core_seed_hosts                  = local.core_seed_hosts
   instance_type                    = var.replicant_instance_type
   replicant_userdata_template_path = "${path.root}/../userdata/replicant.sh"
+  emqx_tune_nofile              = var.emqx_tune_nofile
+  emqx_tune_max_ports           = var.emqx_tune_max_ports
+  emqx_tune_acceptors           = var.emqx_tune_acceptors
+  emqx_tune_max_connections     = var.emqx_tune_max_connections
+  emqx_tune_dist_buffer_size_kb = var.emqx_tune_dist_buffer_size_kb
   health_check_grace_period        = 600
   tags                             = local.common_tags
 
