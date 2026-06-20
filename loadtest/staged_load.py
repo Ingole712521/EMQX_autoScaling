@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import random
 import signal
@@ -185,6 +186,12 @@ def probe_broker(host: str, port: int, topic: str, timeout_sec: float) -> bool:
 
 
 def asg_desired_capacity(asg_name: str, region: str) -> int | None:
+    bounds = asg_capacity_bounds(asg_name, region)
+    return bounds[0] if bounds else None
+
+
+def asg_capacity_bounds(asg_name: str, region: str) -> tuple[int, int, int] | None:
+    """Return (desired, min, max) for the ASG, or None if unavailable."""
     if not asg_name:
         return None
     try:
@@ -193,16 +200,62 @@ def asg_desired_capacity(asg_name: str, region: str) -> int | None:
                 "aws", "autoscaling", "describe-auto-scaling-groups",
                 "--region", region,
                 "--auto-scaling-group-names", asg_name,
-                "--query", "AutoScalingGroups[0].DesiredCapacity",
-                "--output", "text",
+                "--query", "AutoScalingGroups[0].[DesiredCapacity,MinSize,MaxSize]",
+                "--output", "json",
             ],
             stderr=subprocess.DEVNULL,
             text=True,
             timeout=30,
         ).strip()
-        return int(out) if out and out != "None" else None
-    except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+        values = json.loads(out)
+        if not values or len(values) != 3:
+            return None
+        return int(values[0]), int(values[1]), int(values[2])
+    except (subprocess.CalledProcessError, FileNotFoundError, ValueError, json.JSONDecodeError):
         return None
+
+
+def required_replicants_for_clients(
+    target_clients: int,
+    clients_per_replicant: int = 2000,
+    floor: int = 2,
+) -> int:
+    """Estimate how many replicants are needed for a connection target."""
+    per_node = max(1, clients_per_replicant)
+    return max(floor, math.ceil(target_clients / per_node))
+
+
+def resolve_min_asg_for_load(
+    target_clients: int,
+    clients_per_replicant: int,
+    explicit_min: int | None,
+    asg_name: str,
+    region: str,
+) -> int:
+    """Pick ASG wait target: explicit override, else load-based (capped by ASG max_size)."""
+    if explicit_min is not None:
+        return explicit_min
+
+    required = required_replicants_for_clients(target_clients, clients_per_replicant)
+    bounds = asg_capacity_bounds(asg_name, region) if asg_name else None
+    if bounds is None:
+        return required
+
+    desired, _min_size, max_size = bounds
+    if required > max_size:
+        print(
+            f"WARNING: ~{required} replicants needed for {target_clients} connections "
+            f"(~{clients_per_replicant}/node) but ASG max_size={max_size}. "
+            f"Increase replicant_max_size in terraform.tfvars so autoscaling can grow with load.",
+            file=sys.stderr,
+        )
+        return max_size
+
+    print(
+        f"Load-based ASG target: {required} replicants for {target_clients} connections "
+        f"(~{clients_per_replicant}/node; current desired={desired}, max={max_size})"
+    )
+    return required
 
 
 def log_asg_capacity(asg_name: str, region: str, label: str) -> None:
@@ -255,7 +308,11 @@ def run_until_stopped(
     error_samples: list[str] = []
     error_lock = threading.Lock()
 
-    mode = "conn-only (dashboard hold)" if conn_only else "publish load"
+    mode = (
+        "conn-only (connections only, no MQTT publishes)"
+        if conn_only
+        else f"keepalive publish (1 msg/client every {publish_interval_sec}s)"
+    )
     print(f"\n[sustained] {label}: {clients} clients — {mode}")
     print(f"  Connect stagger: {connect_stagger_sec}s between clients (~{int(clients * connect_stagger_sec)}s ramp)")
     if duration_sec > 0:

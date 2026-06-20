@@ -119,15 +119,15 @@ variable "replicant_min_size" {
 }
 
 variable "replicant_desired_capacity" {
-  description = "Desired replicant nodes in ASG."
+  description = "Initial desired replicant count at apply time only; autoscaling may raise desired_capacity with load (ignored on subsequent applies)."
   type        = number
   default     = 1
 }
 
 variable "replicant_max_size" {
-  description = "Maximum replicant nodes in ASG."
+  description = "Hard ASG ceiling; set high enough for peak load (e.g. 10k connections needs several t3.small replicants)."
   type        = number
-  default     = 4
+  default     = 20
 }
 
 variable "scale_out_network_target_bytes" {
@@ -186,4 +186,46 @@ variable "tags" {
     ManagedBy   = "terraform"
     Workload    = "emqx"
   }
+}
+
+variable "lifecycle_hook_timeout_sec" {
+  description = "ASG lifecycle hook heartbeat timeout while replicant drains MQTT sessions on scale-in/termination."
+  type        = number
+  default     = 120
+}
+
+variable "lifecycle_drain_grace_sec" {
+  description = "Seconds to wait after stopping EMQX before completing the lifecycle hook."
+  type        = number
+  default     = 30
+}
+
+variable "enable_load_generator" {
+  description = "Provision a dedicated EC2 instance for resilience and durability validation tests."
+  type        = bool
+  default     = true
+}
+
+variable "load_generator_instance_type" {
+  description = "Instance type for the validation load-generator EC2."
+  type        = string
+  default     = "t3.small"
+}
+
+variable "mqtt_max_mqueue_len" {
+  description = "EMQX per-session message queue length (mqtt.max_mqueue_len)."
+  type        = number
+  default     = 100000
+}
+
+variable "mqtt_session_expiry_interval" {
+  description = "EMQX session expiry interval for durable sessions (e.g. 2h)."
+  type        = string
+  default     = "2h"
+}
+
+variable "mqtt_retry_interval" {
+  description = "EMQX MQTT retry interval for QoS 1/2 (e.g. 30s)."
+  type        = string
+  default     = "30s"
 }

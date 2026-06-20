@@ -63,9 +63,11 @@ resource "aws_launch_template" "emqx_replicant_lt" {
 
   update_default_version = true
 
-  user_data = base64encode(templatefile("${path.module}/userdata/emqx-bootstrap.sh", merge(local.emqx_bootstrap_base, {
-    node_role        = "replicant"
-    core_instance_id = aws_instance.emqx_core.id
+  user_data = base64gzip(templatefile("${path.module}/userdata/emqx-bootstrap.sh", merge(local.emqx_bootstrap_base, {
+    node_role           = "replicant"
+    core_instance_id    = aws_instance.emqx_core.id
+    lifecycle_hook_name = "${var.project_name}-replicant-terminate"
+    asg_name            = "${var.project_name}-replicants-asg"
   })))
 
   tag_specifications {
@@ -116,6 +118,8 @@ resource "aws_autoscaling_group" "emqx_replicants_asg" {
 
   lifecycle {
     create_before_destroy = true
+    # Let CloudWatch autoscaling policies raise desired_capacity above terraform's initial value.
+    ignore_changes = [desired_capacity]
   }
 
   default_cooldown = var.autoscaling_cooldown_sec
