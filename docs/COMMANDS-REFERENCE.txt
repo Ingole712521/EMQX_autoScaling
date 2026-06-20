@@ -301,3 +301,23 @@ J) COMMON MISTAKES
 ================================================================================
 END — ALL COMMANDS IN THIS FILE
 ================================================================================
+
+
+
+ FROM_TERRAFORM=true CLIENTS=100 bash ./scripts/run_sustained_load_test.sh
+
+cd "/d/New folder/emqx"
+
+export MQTT_HOST=$(terraform output -raw mqtt_nlb_dns_name)
+export ASG_NAME=$(terraform output -raw replicant_asg_name)
+export AWS_REGION=ap-south-1
+
+export TARGET_CLIENTS=10000
+export WARMUP_CLIENTS=1000
+export MIN_ASG_CAPACITY=4
+export WARMUP_SEC=600
+export HOLD_SEC=1200
+export CONNECT_STAGGER_SEC=0.12
+export MQTT_CONNECT_TIMEOUT=90
+
+bash ./scripts/run_2k_load_test.sh
