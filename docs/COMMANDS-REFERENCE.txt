@@ -321,3 +321,15 @@ export CONNECT_STAGGER_SEC=0.12
 export MQTT_CONNECT_TIMEOUT=90
 
 bash ./scripts/run_2k_load_test.sh
+
+
+100K
+cd emqx
+bash ./scripts/setup_loadgen_amazon_linux.sh
+
+# paste MQTT_HOST + ASG_NAME from print_load_test_env.sh, then:
+export TARGET_CLIENTS=10000
+export WARMUP_CLIENTS=1000
+export MIN_ASG_CAPACITY=4
+export CONNECT_STAGGER_SEC=0.12
+bash ./scripts/run_2k_load_test.sh
