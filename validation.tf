@@ -36,11 +36,11 @@ resource "aws_iam_role_policy" "emqx_ec2_lifecycle" {
 }
 
 resource "aws_instance" "load_generator" {
-  count = var.enable_load_generator ? 1 : 0
+  count = var.enable_load_generator ? var.load_generator_count : 0
 
   ami                         = data.aws_ami.amazon_linux_2.id
   instance_type               = var.load_generator_instance_type
-  subnet_id                   = aws_subnet.public[0].id
+  subnet_id                   = aws_subnet.public[count.index % length(aws_subnet.public)].id
   vpc_security_group_ids      = [aws_security_group.load_generator_sg[0].id]
   iam_instance_profile        = aws_iam_instance_profile.emqx_ec2.name
   associate_public_ip_address = true
@@ -51,8 +51,9 @@ resource "aws_instance" "load_generator" {
   })
 
   tags = merge(var.tags, {
-    Name = "${var.project_name}-load-generator"
+    Name = "${var.project_name}-load-generator-${count.index + 1}"
     Role = "emqx-load-generator"
+    Shard = tostring(count.index)
   })
 
   depends_on = [aws_lb_listener.mqtt_1883]

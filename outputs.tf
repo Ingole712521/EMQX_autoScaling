@@ -39,8 +39,13 @@ output "lifecycle_hook_name" {
 }
 
 output "load_generator_instance_id" {
-  description = "EC2 instance ID of the validation load generator (empty if disabled)."
-  value       = var.enable_load_generator ? aws_instance.load_generator[0].id : ""
+  description = "First load-generator EC2 instance ID (empty if disabled)."
+  value       = var.enable_load_generator && var.load_generator_count > 0 ? aws_instance.load_generator[0].id : ""
+}
+
+output "load_generator_instance_ids" {
+  description = "All load-generator EC2 instance IDs for distributed 300K tests."
+  value       = var.enable_load_generator ? aws_instance.load_generator[*].id : []
 }
 
 output "access_summary" {

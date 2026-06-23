@@ -97,7 +97,12 @@ case "${MODE}" in
   2k)
     emqx_raise_nofile
     export MQTT_HOST ASG_NAME
-    echo "2k orchestrated demo: warmup ASG -> 2000 conn-only hold for dashboard (~25-35 min total)"
+    echo "2k orchestrated demo: warmup ASG -> connection ramp with keepalive publish"
     exec bash "${ROOT}/scripts/run_2k_load_test.sh"
+    ;;
+  300k)
+    echo "300K must be started from your PC (orchestrates all load-generator shards via SSM):"
+    echo "  cd <repo> && bash ./scripts/run_300k_load_test.sh"
+    exit 1
     ;;
 esac

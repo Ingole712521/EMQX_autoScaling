@@ -207,9 +207,15 @@ variable "enable_load_generator" {
 }
 
 variable "load_generator_instance_type" {
-  description = "Instance type for the validation load-generator EC2."
+  description = "Instance type for each validation load-generator EC2 (use c6i.xlarge+ for 300K sharded load)."
   type        = string
   default     = "t3.small"
+}
+
+variable "load_generator_count" {
+  description = "Number of load-generator EC2 instances (shard 300K as count × clients_per_shard)."
+  type        = number
+  default     = 1
 }
 
 variable "mqtt_max_mqueue_len" {

@@ -43,6 +43,14 @@ DEFAULT_LOAD_STAGES = ",".join(
 )
 
 
+def client_id_for(label: str, index: int, shard: str = "") -> str:
+    """Unique MQTT client id; set CLIENT_SHARD on each load-generator EC2 to avoid collisions."""
+    shard = shard.strip() or os.environ.get("CLIENT_SHARD", "").strip()
+    if shard:
+        return f"load-{shard}-{label}-{index}"
+    return f"load-{label}-{index}"
+
+
 class LoadClient(threading.Thread):
     def __init__(
         self,
@@ -327,7 +335,7 @@ def run_until_stopped(
         worker = LoadClient(
             host=host,
             port=port,
-            client_id=f"load-{label}-{i}",
+            client_id=client_id_for(label, i),
             topic=topic,
             publish_interval_sec=publish_interval_sec,
             payload_size=payload_size,
@@ -408,7 +416,7 @@ def run_stage(
         worker = LoadClient(
             host=host,
             port=port,
-            client_id=f"load-{stage.label}-{i}",
+            client_id=client_id_for(stage.label, i),
             topic=topic,
             publish_interval_sec=publish_interval_sec,
             payload_size=payload_size,

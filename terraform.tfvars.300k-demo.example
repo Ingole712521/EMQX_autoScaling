@@ -1,0 +1,25 @@
+# 300K connection client demo — copy sections into terraform.tfvars before apply.
+# Destroy after demo: terraform destroy
+
+aws_region              = "ap-south-1"
+project_name            = "emqx-prod"
+emqx_node_cookie        = "ChangeThisCookieForProduction"
+emqx_dashboard_password = "ChangeMe!StrongPassword"
+dashboard_allowed_cidr  = "0.0.0.0/0"
+ssh_allowed_cidr        = "0.0.0.0/0"
+
+# Broker capacity (~5k connections per t3.medium → up to ~400k at max 80 nodes)
+core_instance_type       = "t3.medium"
+replicant_instance_type  = "t3.medium"
+replicant_min_size       = 2
+replicant_desired_capacity = 2
+replicant_max_size       = 80
+
+# Faster scale reaction under heavy NLB traffic
+scale_out_network_target_bytes = 3000
+autoscaling_cooldown_sec       = 30
+
+# 10 shards × 30k clients = 300k total (c6i.xlarge ≈ 30k connections each)
+enable_load_generator        = true
+load_generator_count         = 10
+load_generator_instance_type = "c6i.xlarge"
